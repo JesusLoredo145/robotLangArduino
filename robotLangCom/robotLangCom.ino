@@ -1,81 +1,193 @@
-// === Demo RobotLang -> LEDs ===
-// Mapea articulaciones a LEDs para simular movimientos
+// === RobotLang -> Servomotores ===
 // Comandos esperados (por línea):
 // HOME
-// MOVE BASE 100
-// MOVE HOMBRO 85
-// MOVE CODO 90
+// MOVE HOMBRO 95
+// MOVE CODO 80
+// MOVE MUNECA 100
 // WAIT 500
 // GRIP ABRIR
 // GRIP CERRAR
+//
+// NOTA:
+// - El interprete normalmente manda ángulos absolutos.
+//   Ejemplo: si RobotLang dice Mover(HOMBRO, 5), C# puede convertirlo a MOVE HOMBRO 95.
+// - Este sketch mueve lentamente el servo hasta el ángulo recibido.
+// - Acepta MUNECA y MUÑECA.
+//
+// RECOMENDACIÓN ELÉCTRICA:
+// - Usa fuente externa de 5V para servos.
+// - Une GND de la fuente con GND del Arduino.
 
 #include <Arduino.h>
+#include <Servo.h>
 
-const int LED_MUNECA   = 5;
-const int LED_HOMBRO = 6;
-const int LED_CODO   = 7;
+// -------------------------
+// Pines de señal de servos
+// -------------------------
+const int PIN_MUNECA = 5;
+const int PIN_HOMBRO = 6;
+const int PIN_CODO   = 7;
+
+// -------------------------
+// Configuración de velocidad
+// -------------------------
+// Mientras más alto sea este valor, más lento se mueve.
+const int SERVO_STEP_DELAY_MS = 25;   // velocidad lenta y segura
+const int SERVO_STEP_DEGREES  = 1;    // mover de 1 grado por paso
+
+// Límites por articulación (ajústalos si tu mecánica lo necesita)
+const int MIN_MUNECA = 0;
+const int MAX_MUNECA = 180;
+
+const int MIN_HOMBRO = 0;
+const int MAX_HOMBRO = 180;
+
+const int MIN_CODO = 0;
+const int MAX_CODO = 180;
+
+// Posición HOME
+const int HOME_MUNECA = 90;
+const int HOME_HOMBRO = 90;
+const int HOME_CODO   = 90;
+
+// Objetos servo
+Servo servoMuneca;
+Servo servoHombro;
+Servo servoCodo;
+
+// Estado actual de ángulos
+int currentMuneca = HOME_MUNECA;
+int currentHombro = HOME_HOMBRO;
+int currentCodo   = HOME_CODO;
 
 String line;
 
-void blinkPin(int pin, int msOn = 180, int msOff = 80, int times = 1) {
-  for (int i = 0; i < times; i++) {
-    digitalWrite(pin, HIGH);
-    delay(msOn);
-    digitalWrite(pin, LOW);
-    delay(msOff);
-  }
-}
-
-void homeAnim() {
-  // animación corta para "HOME"
-  blinkPin(LED_MUNECA, 120, 60, 1);
-  blinkPin(LED_HOMBRO, 120, 60, 1);
-  blinkPin(LED_CODO, 120, 60, 1);
-}
-
-int jointToPin(const String& joint) {
-  if (joint == "HOMBRO") return LED_HOMBRO;
-  if (joint == "CODO") return LED_CODO;
-  if (joint == "MUÑECA" || joint == "MUNECA") return LED_MUNECA;
-  return -1;
-}
-
-
+// -------------------------------------
+// Utilidades
+// -------------------------------------
 bool startsWithWord(const String& s, const char* w) {
   return s.startsWith(w);
 }
 
-void setup() {
-  pinMode(LED_MUNECA, OUTPUT);
-  pinMode(LED_HOMBRO, OUTPUT);
-  pinMode(LED_CODO, OUTPUT);
-
-  digitalWrite(LED_MUNECA, LOW);
-  digitalWrite(LED_HOMBRO, LOW);
-  digitalWrite(LED_CODO, LOW);
-
-  Serial.begin(9600);
-  while (!Serial) { /* por compat */ }
-
-  Serial.println("OK"); // opcional: saludo inicial
+int clampValue(int value, int minValue, int maxValue) {
+  if (value < minValue) return minValue;
+  if (value > maxValue) return maxValue;
+  return value;
 }
 
+String normalizeJoint(String joint) {
+  joint.trim();
+  joint.toUpperCase();
+
+  // Normalización manual de variantes comunes
+  if (joint == "MUÑECA") return "MUNECA";
+  return joint;
+}
+
+// -------------------------------------
+// Movimiento lento de servos
+// -------------------------------------
+void moveServoSlow(Servo& servo, int& currentAngle, int targetAngle) {
+  targetAngle = clampValue(targetAngle, 0, 180);
+
+  if (targetAngle == currentAngle) {
+    servo.write(currentAngle);
+    return;
+  }
+
+  if (targetAngle > currentAngle) {
+    for (int pos = currentAngle; pos <= targetAngle; pos += SERVO_STEP_DEGREES) {
+      servo.write(pos);
+      delay(SERVO_STEP_DELAY_MS);
+    }
+  } else {
+    for (int pos = currentAngle; pos >= targetAngle; pos -= SERVO_STEP_DEGREES) {
+      servo.write(pos);
+      delay(SERVO_STEP_DELAY_MS);
+    }
+  }
+
+  currentAngle = targetAngle;
+  servo.write(currentAngle);
+}
+
+// -------------------------------------
+// HOME
+// -------------------------------------
+void goHomeSlow() {
+  moveServoSlow(servoMuneca, currentMuneca, HOME_MUNECA);
+  moveServoSlow(servoHombro, currentHombro, HOME_HOMBRO);
+  moveServoSlow(servoCodo,   currentCodo,   HOME_CODO);
+}
+
+// -------------------------------------
+// Movimiento por articulación
+// -------------------------------------
+bool moveJointByName(const String& rawJoint, int angle) {
+  String joint = normalizeJoint(rawJoint);
+
+  if (joint == "HOMBRO") {
+    angle = clampValue(angle, MIN_HOMBRO, MAX_HOMBRO);
+    moveServoSlow(servoHombro, currentHombro, angle);
+    return true;
+  }
+
+  if (joint == "CODO") {
+    angle = clampValue(angle, MIN_CODO, MAX_CODO);
+    moveServoSlow(servoCodo, currentCodo, angle);
+    return true;
+  }
+
+  if (joint == "MUNECA") {
+    angle = clampValue(angle, MIN_MUNECA, MAX_MUNECA);
+    moveServoSlow(servoMuneca, currentMuneca, angle);
+    return true;
+  }
+
+  return false;
+}
+
+// -------------------------------------
+// Setup
+// -------------------------------------
+void setup() {
+  Serial.begin(9600);
+  while (!Serial) { /* compatibilidad */ }
+
+  // Adjuntar servos
+  servoMuneca.attach(PIN_MUNECA);
+  servoHombro.attach(PIN_HOMBRO);
+  servoCodo.attach(PIN_CODO);
+
+  // Llevar a HOME inicial lentamente
+  servoMuneca.write(currentMuneca);
+  servoHombro.write(currentHombro);
+  servoCodo.write(currentCodo);
+
+  delay(500);
+
+  Serial.println("OK");
+}
+
+// -------------------------------------
+// Loop principal
+// -------------------------------------
 void loop() {
   if (!Serial.available()) return;
 
   line = Serial.readStringUntil('\n');
   line.trim();
+
   if (line.length() == 0) return;
 
-  // Para depurar:
-  // Serial.print("RX: "); Serial.println(line);
-
+  // HOME
   if (line == "HOME") {
-    homeAnim();
+    goHomeSlow();
     Serial.println("OK");
     return;
   }
 
+  // WAIT <ms>
   if (startsWithWord(line, "WAIT ")) {
     int ms = line.substring(5).toInt();
     if (ms < 0) ms = 0;
@@ -84,20 +196,19 @@ void loop() {
     return;
   }
 
+  // GRIP <accion>
+  // Por ahora solo respondemos OK para no romper la comunicación.
+  // Más adelante aquí puedes conectar un servo de pinza.
   if (startsWithWord(line, "GRIP ")) {
-    // demo: parpadeo de todos
-    blinkPin(LED_MUNECA, 80, 40, 1);
-    blinkPin(LED_HOMBRO, 80, 40, 1);
-    blinkPin(LED_CODO, 80, 40, 1);
     Serial.println("OK");
     return;
   }
 
+  // MOVE <JOINT> <ANGLE>
   if (startsWithWord(line, "MOVE ")) {
-    // Formato: MOVE <JOINT> <ANGLE>
-    // Ej: MOVE BASE 100
     int firstSpace = line.indexOf(' ');
     int secondSpace = line.indexOf(' ', firstSpace + 1);
+
     if (secondSpace < 0) {
       Serial.println("ERR BAD MOVE FORMAT");
       return;
@@ -105,30 +216,44 @@ void loop() {
 
     String joint = line.substring(firstSpace + 1, secondSpace);
     joint.trim();
-    joint.toUpperCase();
 
     String angleStr = line.substring(secondSpace + 1);
     angleStr.trim();
-    int angle = angleStr.toInt(); // en demo no importa mucho
 
-    int pin = jointToPin(joint);
-    if (pin < 0) {
+    // Validación simple del ángulo
+    bool hasDigits = false;
+    for (unsigned int i = 0; i < angleStr.length(); i++) {
+      char c = angleStr.charAt(i);
+      if (isDigit(c) || c == '-') {
+        hasDigits = true;
+      } else {
+        hasDigits = false;
+        break;
+      }
+    }
+
+    if (!hasDigits) {
+      Serial.println("ERR BAD ANGLE");
+      return;
+    }
+
+    int angle = angleStr.toInt();
+
+    if (angle < 0 || angle > 180) {
+      Serial.println("ERR ANGLE OUT OF RANGE");
+      return;
+    }
+
+    bool ok = moveJointByName(joint, angle);
+    if (!ok) {
       Serial.print("ERR UNKNOWN JOINT ");
       Serial.println(joint);
       return;
     }
 
-    // demo: parpadeo proporcional simple (opcional)
-    // entre 1 y 3 parpadeos dependiendo del ángulo
-    int times = 1;
-    if (angle >= 120) times = 3;
-    else if (angle >= 90) times = 2;
-
-    blinkPin(pin, 180, 90, times);
     Serial.println("OK");
     return;
   }
 
-  // Si llega algo no reconocido:
   Serial.println("ERR UNKNOWN COMMAND");
 }

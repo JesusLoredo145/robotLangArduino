@@ -1,23 +1,3 @@
-// === RobotLang -> Servomotores ===
-// Comandos esperados (por línea):
-// HOME
-// MOVE HOMBRO 95
-// MOVE CODO 80
-// MOVE MUNECA 100
-// WAIT 500
-// GRIP ABRIR
-// GRIP CERRAR
-//
-// NOTA:
-// - El interprete normalmente manda ángulos absolutos.
-//   Ejemplo: si RobotLang dice Mover(HOMBRO, 5), C# puede convertirlo a MOVE HOMBRO 95.
-// - Este sketch mueve lentamente el servo hasta el ángulo recibido.
-// - Acepta MUNECA y MUÑECA.
-//
-// RECOMENDACIÓN ELÉCTRICA:
-// - Usa fuente externa de 5V para servos.
-// - Une GND de la fuente con GND del Arduino.
-
 #include <Arduino.h>
 #include <Servo.h>
 
@@ -29,13 +9,8 @@ const int PIN_HOMBRO = 6;
 const int PIN_CODO   = 7;
 
 // -------------------------
-// Configuración de velocidad
+// Límites por articulación
 // -------------------------
-// Mientras más alto sea este valor, más lento se mueve.
-const int SERVO_STEP_DELAY_MS = 25;   // velocidad lenta y segura
-const int SERVO_STEP_DEGREES  = 1;    // mover de 1 grado por paso
-
-// Límites por articulación (ajústalos si tu mecánica lo necesita)
 const int MIN_MUNECA = 0;
 const int MAX_MUNECA = 180;
 
@@ -45,17 +20,23 @@ const int MAX_HOMBRO = 180;
 const int MIN_CODO = 0;
 const int MAX_CODO = 180;
 
+// -------------------------
 // Posición HOME
+// -------------------------
 const int HOME_MUNECA = 90;
 const int HOME_HOMBRO = 90;
 const int HOME_CODO   = 90;
 
+// -------------------------
 // Objetos servo
+// -------------------------
 Servo servoMuneca;
 Servo servoHombro;
 Servo servoCodo;
 
+// -------------------------
 // Estado actual de ángulos
+// -------------------------
 int currentMuneca = HOME_MUNECA;
 int currentHombro = HOME_HOMBRO;
 int currentCodo   = HOME_CODO;
@@ -79,34 +60,17 @@ String normalizeJoint(String joint) {
   joint.trim();
   joint.toUpperCase();
 
-  // Normalización manual de variantes comunes
+  // Acepta MUÑECA y MUNECA
   if (joint == "MUÑECA") return "MUNECA";
+
   return joint;
 }
 
 // -------------------------------------
-// Movimiento lento de servos
+// Movimiento directo
 // -------------------------------------
-void moveServoSlow(Servo& servo, int& currentAngle, int targetAngle) {
+void moveServoDirect(Servo& servo, int& currentAngle, int targetAngle) {
   targetAngle = clampValue(targetAngle, 0, 180);
-
-  if (targetAngle == currentAngle) {
-    servo.write(currentAngle);
-    return;
-  }
-
-  if (targetAngle > currentAngle) {
-    for (int pos = currentAngle; pos <= targetAngle; pos += SERVO_STEP_DEGREES) {
-      servo.write(pos);
-      delay(SERVO_STEP_DELAY_MS);
-    }
-  } else {
-    for (int pos = currentAngle; pos >= targetAngle; pos -= SERVO_STEP_DEGREES) {
-      servo.write(pos);
-      delay(SERVO_STEP_DELAY_MS);
-    }
-  }
-
   currentAngle = targetAngle;
   servo.write(currentAngle);
 }
@@ -114,10 +78,10 @@ void moveServoSlow(Servo& servo, int& currentAngle, int targetAngle) {
 // -------------------------------------
 // HOME
 // -------------------------------------
-void goHomeSlow() {
-  moveServoSlow(servoMuneca, currentMuneca, HOME_MUNECA);
-  moveServoSlow(servoHombro, currentHombro, HOME_HOMBRO);
-  moveServoSlow(servoCodo,   currentCodo,   HOME_CODO);
+void goHome() {
+  moveServoDirect(servoMuneca, currentMuneca, HOME_MUNECA);
+  moveServoDirect(servoHombro, currentHombro, HOME_HOMBRO);
+  moveServoDirect(servoCodo,   currentCodo,   HOME_CODO);
 }
 
 // -------------------------------------
@@ -128,19 +92,19 @@ bool moveJointByName(const String& rawJoint, int angle) {
 
   if (joint == "HOMBRO") {
     angle = clampValue(angle, MIN_HOMBRO, MAX_HOMBRO);
-    moveServoSlow(servoHombro, currentHombro, angle);
+    moveServoDirect(servoHombro, currentHombro, angle);
     return true;
   }
 
   if (joint == "CODO") {
     angle = clampValue(angle, MIN_CODO, MAX_CODO);
-    moveServoSlow(servoCodo, currentCodo, angle);
+    moveServoDirect(servoCodo, currentCodo, angle);
     return true;
   }
 
   if (joint == "MUNECA") {
     angle = clampValue(angle, MIN_MUNECA, MAX_MUNECA);
-    moveServoSlow(servoMuneca, currentMuneca, angle);
+    moveServoDirect(servoMuneca, currentMuneca, angle);
     return true;
   }
 
@@ -152,14 +116,13 @@ bool moveJointByName(const String& rawJoint, int angle) {
 // -------------------------------------
 void setup() {
   Serial.begin(9600);
-  while (!Serial) { /* compatibilidad */ }
+  while (!Serial) { }
 
-  // Adjuntar servos
   servoMuneca.attach(PIN_MUNECA);
   servoHombro.attach(PIN_HOMBRO);
   servoCodo.attach(PIN_CODO);
 
-  // Llevar a HOME inicial lentamente
+  // Posición inicial
   servoMuneca.write(currentMuneca);
   servoHombro.write(currentHombro);
   servoCodo.write(currentCodo);
@@ -182,7 +145,7 @@ void loop() {
 
   // HOME
   if (line == "HOME") {
-    goHomeSlow();
+    goHome();
     Serial.println("OK");
     return;
   }
@@ -197,8 +160,7 @@ void loop() {
   }
 
   // GRIP <accion>
-  // Por ahora solo respondemos OK para no romper la comunicación.
-  // Más adelante aquí puedes conectar un servo de pinza.
+  // Por ahora solo responde OK
   if (startsWithWord(line, "GRIP ")) {
     Serial.println("OK");
     return;
@@ -220,7 +182,6 @@ void loop() {
     String angleStr = line.substring(secondSpace + 1);
     angleStr.trim();
 
-    // Validación simple del ángulo
     bool hasDigits = false;
     for (unsigned int i = 0; i < angleStr.length(); i++) {
       char c = angleStr.charAt(i);
